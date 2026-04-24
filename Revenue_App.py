@@ -17,6 +17,119 @@ st.set_page_config(
 
 
 # =========================
+# Responsive UI helpers
+# =========================
+
+st.markdown(
+    """
+    <style>
+        /* Make built-in Streamlit metric values scale down instead of clipping. */
+        [data-testid="stMetric"] {
+            overflow: visible;
+        }
+
+        [data-testid="stMetricValue"] {
+            white-space: normal;
+            overflow: visible;
+        }
+
+        [data-testid="stMetricValue"] div {
+            font-size: clamp(1rem, 2.2vw, 1.75rem) !important;
+            line-height: 1.15 !important;
+            white-space: normal !important;
+            overflow-wrap: anywhere;
+            word-break: break-word;
+        }
+
+        [data-testid="stMetricLabel"] {
+            white-space: normal;
+        }
+
+        /* Revenue result cards: auto-fit prevents the 5 revenue cards from becoming too narrow. */
+        .revenue-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(175px, 1fr));
+            gap: 0.85rem;
+            margin-top: 0.35rem;
+            margin-bottom: 1rem;
+        }
+
+        .revenue-card {
+            border: 1px solid rgba(128, 128, 128, 0.25);
+            border-radius: 0.75rem;
+            padding: 0.9rem 1rem;
+            background: rgba(128, 128, 128, 0.06);
+            min-width: 0;
+        }
+
+        .revenue-label {
+            font-size: 0.9rem;
+            opacity: 0.72;
+            line-height: 1.2;
+            margin-bottom: 0.4rem;
+            overflow-wrap: anywhere;
+        }
+
+        .revenue-value {
+            font-size: clamp(1.05rem, 3vw, 1.65rem);
+            font-weight: 700;
+            line-height: 1.15;
+            white-space: normal;
+            overflow-wrap: anywhere;
+            word-break: break-word;
+        }
+
+        @media (max-width: 700px) {
+            .revenue-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+
+def format_robux(value):
+    """Format Robux values compactly for cards while preserving useful precision."""
+    if value is None:
+        return "N/A"
+
+    abs_value = abs(value)
+
+    if abs_value >= 1_000_000_000_000:
+        return f"{value / 1_000_000_000_000:,.2f}T R$"
+
+    if abs_value >= 1_000_000_000:
+        return f"{value / 1_000_000_000:,.2f}B R$"
+
+    if abs_value >= 1_000_000:
+        return f"{value / 1_000_000:,.2f}M R$"
+
+    if abs_value >= 1_000:
+        return f"{value / 1_000:,.2f}K R$"
+
+    return f"{value:,.2f} R$"
+
+
+def render_revenue_cards(items):
+    cards_html = "".join(
+        f"""
+        <div class="revenue-card">
+            <div class="revenue-label">{label}</div>
+            <div class="revenue-value" title="{full_value}">{display_value}</div>
+        </div>
+        """
+        for label, display_value, full_value in items
+    )
+
+    st.markdown(
+        f"<div class=\"revenue-grid\">{cards_html}</div>",
+        unsafe_allow_html=True,
+    )
+
+
+# =========================
 # Roblox API scraper logic
 # =========================
 
@@ -499,37 +612,35 @@ if calculate_button:
 
     st.header("💰 Daily Revenue Estimate")
 
-    col1, col2, col3, col4, col5 = st.columns(5)
-
-    with col1:
-        st.metric(
+    revenue_cards = [
+        (
             "Engagement Revenue",
+            format_robux(revenue["Engagement_Revenue"]),
             f"{revenue['Engagement_Revenue']:,.2f} R$",
-        )
-
-    with col2:
-        st.metric(
+        ),
+        (
             "Pass Revenue",
+            format_robux(revenue["Total_Pass_Revenue"]),
             f"{revenue['Total_Pass_Revenue']:,.2f} R$",
-        )
-
-    with col3:
-        st.metric(
+        ),
+        (
             "Dev Product Revenue",
+            format_robux(revenue["Dev_Product_Revenue"]),
             f"{revenue['Dev_Product_Revenue']:,.2f} R$",
-        )
-
-    with col4:
-        st.metric(
+        ),
+        (
             "Server Revenue",
+            format_robux(revenue["Server_Revenue"]),
             f"{revenue['Server_Revenue']:,.2f} R$",
-        )
-
-    with col5:
-        st.metric(
+        ),
+        (
             "Total Revenue",
+            format_robux(revenue["Total_Revenue"]),
             f"{revenue['Total_Revenue']:,.2f} R$",
-        )
+        ),
+    ]
+
+    render_revenue_cards(revenue_cards)
 
     st.subheader("Calculation Settings")
 
