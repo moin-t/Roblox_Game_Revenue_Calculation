@@ -87,18 +87,5 @@ To run a full calculation, the following inputs are required:
 
 ---
 
-## ⚠️ Model Assumptions
-* **Directional Accuracy:** This is a model, not a financial statement. Actual results vary based on update cycles and community retention.
-* **Platform Fee:** Assumes a standard **30% Roblox platform fee** (0.70 multiplier).
-* **Pricing Impact:** Assumes that higher prices drastically reduce the percentage of players willing to purchase.
+*Created for Roblox researchers to better understand the mechanics of game monetization.*
 
----
-
-## 🛠 Improvement Roadmap
-* [ ] Integration of **Premium Payout** (Engagement-based) modeling.
-* [ ] **Monthly/Yearly** forecasting projections.
-* [ ] **Robux-to-USD** conversion based on current Devex rates.
-* [ ] Customizable scaling factors for engagement and server multipliers.
-
----
-*Created for Roblox Developers to better understand the mechanics of game monetization.*
