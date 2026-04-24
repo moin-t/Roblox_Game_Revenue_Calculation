@@ -389,12 +389,10 @@ def calculate_daily_revenue(
     multiplier = get_dev_product_multiplier(visits)
     dev_product_revenue = total_pass_revenue * multiplier
 
-    if servers:
-        players_per_server = user_count / servers
-    else:
-        players_per_server = 0
-
-    server_revenue = servers * players_per_server * 100
+    # Rolimons User_Count is average users per server.
+    # Daily Server Revenue = Average Users Per Server * Server Count * 100
+    players_per_server = user_count if servers else 0
+    server_revenue = user_count * servers * 100
 
     total_revenue = (
         engagement_revenue
@@ -427,7 +425,10 @@ def calculate_daily_revenue(
 # =========================
 
 st.title("💰 Roblox Daily Revenue Calculator")
-st.caption("Calculates estimated daily Robux revenue using Roblox API, Rolimons data, game passes, DAU, servers, and genre-based Qgenre.")
+st.caption(
+    "Calculates estimated daily Robux revenue using Roblox API, Rolimons data, "
+    "game passes, DAU, servers, and genre-based Qgenre."
+)
 
 with st.sidebar:
     st.header("Input")
@@ -470,7 +471,7 @@ with st.sidebar:
         )
 
         custom_user_count = st.number_input(
-            "Manual User Count",
+            "Manual Avg Users Per Server",
             min_value=0.0,
             value=0.0,
             step=10.0,
@@ -504,7 +505,7 @@ st.markdown(
 
     **Daily Dev Product Revenue** = `Total Pass Revenue * Multiplier`
 
-    **Daily Server Revenue** = `Server Count * Players Per Server * 100`
+    **Daily Server Revenue** = `Average Users Per Server * Server Count * 100`
 
     **Total Revenue** = `Engagement + Pass + Dev Product + Server`
     """
@@ -567,10 +568,16 @@ if calculate_button:
         st.metric("Game", roblox_data["name"] or "Unknown")
 
     with col2:
-        st.metric("Visits", f"{roblox_data['visits']:,}" if roblox_data["visits"] else "N/A")
+        st.metric(
+            "Visits",
+            f"{roblox_data['visits']:,}" if roblox_data["visits"] else "N/A",
+        )
 
     with col3:
-        st.metric("Likes", f"{roblox_data['likes']:,}" if roblox_data["likes"] is not None else "N/A")
+        st.metric(
+            "Likes",
+            f"{roblox_data['likes']:,}" if roblox_data["likes"] is not None else "N/A",
+        )
 
     with col4:
         st.metric("Genre", roblox_data["genre"] or "Unknown")
@@ -597,7 +604,7 @@ if calculate_button:
         st.metric("DAU", f"{revenue['DAU']:,.0f}")
 
     with col2:
-        st.metric("User Count", f"{revenue['User_Count']:,.0f}")
+        st.metric("Avg Users / Server", f"{revenue['User_Count']:,.2f}")
 
     with col3:
         st.metric("Servers", f"{revenue['Servers']:,.0f}")
@@ -730,8 +737,8 @@ Dev Product Revenue
 = {revenue['Dev_Product_Revenue']:,.2f} R$
 
 Server Revenue
-= Server Count * Players Per Server * 100
-= {revenue['Servers']:,.0f} * {revenue['Players_Per_Server']:,.2f} * 100
+= Average Users Per Server * Server Count * 100
+= {revenue['User_Count']:,.2f} * {revenue['Servers']:,.0f} * 100
 = {revenue['Server_Revenue']:,.2f} R$
 
 Total Revenue
