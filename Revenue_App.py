@@ -113,20 +113,19 @@ def format_robux(value):
 
 
 def render_revenue_cards(items):
-    cards_html = "".join(
-        f"""
-        <div class="revenue-card">
-            <div class="revenue-label">{label}</div>
-            <div class="revenue-value" title="{full_value}">{display_value}</div>
-        </div>
-        """
-        for label, display_value, full_value in items
-    )
+    """Render revenue values without raw HTML, so nothing leaks into the UI."""
+    rows = [items[:3], items[3:]]
 
-    st.markdown(
-        f"<div class=\"revenue-grid\">{cards_html}</div>",
-        unsafe_allow_html=True,
-    )
+    for row in rows:
+        columns = st.columns(len(row))
+
+        for col, (label, display_value, full_value) in zip(columns, row):
+            with col:
+                st.metric(
+                    label,
+                    display_value,
+                    help=f"Full value: {full_value}",
+                )
 
 
 # =========================
