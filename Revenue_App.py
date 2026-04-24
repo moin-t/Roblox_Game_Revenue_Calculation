@@ -1,13 +1,13 @@
 import streamlit as st
+import pandas as pd
 import requests
 from curl_cffi import requests as curl_requests
 from lxml import html
-import pandas as pd
 
 
-# =========================
-# Page setup
-# =========================
+# ============================================================
+# Streamlit page config
+# ============================================================
 
 st.set_page_config(
     page_title="Roblox Revenue Calculator",
@@ -16,73 +16,79 @@ st.set_page_config(
 )
 
 
-# =========================
-# Responsive UI helpers
-# =========================
+# ============================================================
+# Styling
+# ============================================================
 
 st.markdown(
     """
     <style>
-        /* Make built-in Streamlit metric values scale down instead of clipping. */
-        [data-testid="stMetric"] {
-            overflow: visible;
+        .main {
+            background-color: #f7f8fb;
         }
 
-        [data-testid="stMetricValue"] {
-            white-space: normal;
-            overflow: visible;
+        .block-container {
+            padding-top: 2rem;
+            padding-bottom: 2rem;
         }
 
-        [data-testid="stMetricValue"] div {
-            font-size: clamp(1rem, 2.2vw, 1.75rem) !important;
-            line-height: 1.15 !important;
-            white-space: normal !important;
-            overflow-wrap: anywhere;
-            word-break: break-word;
+        .metric-card {
+            background: white;
+            padding: 1.2rem;
+            border-radius: 18px;
+            box-shadow: 0 4px 18px rgba(0,0,0,0.06);
+            border: 1px solid #eeeeee;
         }
 
-        [data-testid="stMetricLabel"] {
-            white-space: normal;
-        }
-
-        /* Revenue result cards: auto-fit prevents the 5 revenue cards from becoming too narrow. */
-        .revenue-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(175px, 1fr));
-            gap: 0.85rem;
-            margin-top: 0.35rem;
+        .section-card {
+            background: white;
+            padding: 1.5rem;
+            border-radius: 20px;
+            box-shadow: 0 4px 18px rgba(0,0,0,0.06);
+            border: 1px solid #eeeeee;
             margin-bottom: 1rem;
         }
 
-        .revenue-card {
-            border: 1px solid rgba(128, 128, 128, 0.25);
-            border-radius: 0.75rem;
-            padding: 0.9rem 1rem;
-            background: rgba(128, 128, 128, 0.06);
-            min-width: 0;
+        .big-title {
+            font-size: 2.4rem;
+            font-weight: 800;
+            margin-bottom: 0.25rem;
         }
 
-        .revenue-label {
-            font-size: 0.9rem;
-            opacity: 0.72;
-            line-height: 1.2;
-            margin-bottom: 0.4rem;
-            overflow-wrap: anywhere;
+        .subtitle {
+            color: #666;
+            font-size: 1rem;
+            margin-bottom: 2rem;
         }
 
-        .revenue-value {
-            font-size: clamp(1.05rem, 3vw, 1.65rem);
-            font-weight: 700;
-            line-height: 1.15;
-            white-space: normal;
-            overflow-wrap: anywhere;
-            word-break: break-word;
+        .revenue-total {
+            background: linear-gradient(135deg, #111827, #374151);
+            color: white;
+            padding: 2rem;
+            border-radius: 24px;
+            text-align: center;
+            box-shadow: 0 6px 24px rgba(0,0,0,0.16);
         }
 
-        @media (max-width: 700px) {
-            .revenue-grid {
-                grid-template-columns: 1fr;
-            }
+        .revenue-total h1 {
+            font-size: 3rem;
+            margin: 0;
+        }
+
+        .revenue-total p {
+            margin: 0;
+            color: #d1d5db;
+            font-size: 1rem;
+        }
+
+        div[data-testid="stMetricValue"] {
+            font-size: 1.8rem;
+            font-weight: 800;
+        }
+
+        div[data-testid="stDataFrame"] {
+            border-radius: 16px;
+            overflow: hidden;
         }
     </style>
     """,
@@ -90,47 +96,9 @@ st.markdown(
 )
 
 
-def format_robux(value):
-    """Format Robux values compactly for cards while preserving useful precision."""
-    if value is None:
-        return "N/A"
-
-    abs_value = abs(value)
-
-    if abs_value >= 1_000_000_000_000:
-        return f"{value / 1_000_000_000_000:,.2f}T R$"
-
-    if abs_value >= 1_000_000_000:
-        return f"{value / 1_000_000_000:,.2f}B R$"
-
-    if abs_value >= 1_000_000:
-        return f"{value / 1_000_000:,.2f}M R$"
-
-    if abs_value >= 1_000:
-        return f"{value / 1_000:,.2f}K R$"
-
-    return f"{value:,.2f} R$"
-
-
-def render_revenue_cards(items):
-    """Render revenue values without raw HTML, so nothing leaks into the UI."""
-    rows = [items[:3], items[3:]]
-
-    for row in rows:
-        columns = st.columns(len(row))
-
-        for col, (label, display_value, full_value) in zip(columns, row):
-            with col:
-                st.metric(
-                    label,
-                    display_value,
-                    help=f"Full value: {full_value}",
-                )
-
-
-# =========================
+# ============================================================
 # Roblox API scraper logic
-# =========================
+# ============================================================
 
 def get_game_and_passes(place_id):
     universe_url = f"https://apis.roblox.com/universes/v1/places/{place_id}/universe"
@@ -141,7 +109,7 @@ def get_game_and_passes(place_id):
         universe_id = u_resp.json().get("universeId")
 
         if not universe_id:
-            return None, "❌ Invalid Place ID."
+            return None, "Invalid Place ID."
 
         game_url = f"https://games.roblox.com/v1/games?universeIds={universe_id}"
         votes_url = f"https://games.roblox.com/v1/games/votes?universeIds={universe_id}"
@@ -156,10 +124,21 @@ def get_game_and_passes(place_id):
         votes_json = votes_resp.json()
 
         if not game_json.get("data"):
-            return None, "❌ No game data found."
+            return None, "No Roblox game data found."
 
         game_data = game_json["data"][0]
-        votes_data = votes_json["data"][0] if votes_json.get("data") else {}
+
+        if votes_json.get("data"):
+            votes_data = votes_json["data"][0]
+        else:
+            votes_data = {}
+
+        genre = (
+            game_data.get("genre")
+            or game_data.get("genre_l1")
+            or game_data.get("genre_l2")
+            or "Unknown"
+        )
 
         passes_url = (
             f"https://apis.roblox.com/game-passes/v1/universes/"
@@ -175,19 +154,24 @@ def get_game_and_passes(place_id):
             "place_id": place_id,
             "universe_id": universe_id,
             "name": game_data.get("name"),
-            "genre": game_data.get("genre"),
-            "visits": game_data.get("visits"),
-            "likes": votes_data.get("upVotes"),
+            "description": game_data.get("description"),
+            "genre": genre,
+            "creator": game_data.get("creator", {}),
+            "visits": game_data.get("visits", 0),
+            "playing": game_data.get("playing", 0),
+            "favorites": game_data.get("favoritedCount", 0),
+            "likes": votes_data.get("upVotes", 0),
+            "dislikes": votes_data.get("downVotes", 0),
             "passes": passes_data,
         }, None
 
     except Exception as e:
-        return None, f"⚠️ Roblox API Error: {e}"
+        return None, str(e)
 
 
-# =========================
+# ============================================================
 # Rolimons scraper logic
-# =========================
+# ============================================================
 
 GAME_DAU_XPATH = "/html/body/div[2]/div[2]/div[9]/div[4]/div/div[2]"
 
@@ -232,162 +216,136 @@ def get_xpath_value(tree, xpath: str, field_name: str):
 
 
 def scrape_rolimons_game(rolimons_id: str):
-    try:
-        game_url = f"https://www.rolimons.com/game/{rolimons_id}"
-        servers_url = f"https://www.rolimons.com/gameservers/{rolimons_id}"
+    game_url = f"https://www.rolimons.com/game/{rolimons_id}"
+    servers_url = f"https://www.rolimons.com/gameservers/{rolimons_id}"
 
-        game_tree = fetch_html(game_url)
-        servers_tree = fetch_html(servers_url)
+    game_tree = fetch_html(game_url)
+    servers_tree = fetch_html(servers_url)
 
-        dau = get_xpath_value(game_tree, GAME_DAU_XPATH, "DAU")
-        user_count = get_xpath_value(servers_tree, SERVER_USER_COUNT_XPATH, "User_Count")
-        servers = get_xpath_value(servers_tree, SERVER_COUNT_XPATH, "Servers")
+    dau = get_xpath_value(game_tree, GAME_DAU_XPATH, "DAU")
+    user_count = get_xpath_value(servers_tree, SERVER_USER_COUNT_XPATH, "User_Count")
+    servers = get_xpath_value(servers_tree, SERVER_COUNT_XPATH, "Servers")
 
-        return {
-            "Rolimons_ID": rolimons_id,
-            "DAU": dau,
-            "User_Count": user_count,
-            "Servers": servers,
-            "Game_URL": game_url,
-            "Servers_URL": servers_url,
-        }, None
-
-    except Exception as e:
-        return None, f"⚠️ Rolimons Error: {e}"
+    return {
+        "Rolimons_ID": rolimons_id,
+        "DAU": dau,
+        "User_Count": user_count,
+        "Servers": servers,
+        "Game_URL": game_url,
+        "Servers_URL": servers_url,
+    }
 
 
-# =========================
+# ============================================================
 # Revenue calculation logic
-# =========================
+# ============================================================
 
 QGENRE_TABLE = {
-    "pvp": 0.26,
-    "horror": 0.22,
-    "simulator": 0.20,
-    "roleplay": 0.15,
-    "obby": 0.07,
+    "pvp": {
+        "low": 0.18,
+        "high": 0.26,
+        "mid": 0.22,
+    },
+    "horror": {
+        "low": 0.15,
+        "high": 0.22,
+        "mid": 0.185,
+    },
+    "simulator": {
+        "low": 0.12,
+        "high": 0.20,
+        "mid": 0.16,
+    },
+    "roleplay": {
+        "low": 0.08,
+        "high": 0.15,
+        "mid": 0.115,
+    },
+    "obby": {
+        "low": 0.03,
+        "high": 0.07,
+        "mid": 0.05,
+    },
 }
 
 
-def normalize_genre(genre):
+def detect_qgenre_from_roblox_genre(genre: str, qgenre_mode: str = "mid"):
     if not genre:
-        return None
+        return "unknown", 0
 
-    genre_lower = genre.lower()
+    genre_clean = genre.lower().strip()
 
-    if "pvp" in genre_lower or "fighting" in genre_lower or "battle" in genre_lower:
-        return "pvp"
+    if "pvp" in genre_clean or "fighting" in genre_clean or "combat" in genre_clean or "battle" in genre_clean:
+        matched = "pvp"
+    elif "horror" in genre_clean:
+        matched = "horror"
+    elif "simulator" in genre_clean or "simulation" in genre_clean:
+        matched = "simulator"
+    elif "roleplay" in genre_clean or "role play" in genre_clean or "rp" == genre_clean:
+        matched = "roleplay"
+    elif "obby" in genre_clean or "obstacle" in genre_clean or "parkour" in genre_clean:
+        matched = "obby"
+    else:
+        matched = "unknown"
 
-    if "horror" in genre_lower:
-        return "horror"
+    if matched == "unknown":
+        return matched, 0
 
-    if "simulator" in genre_lower or "sim" in genre_lower:
-        return "simulator"
-
-    if "roleplay" in genre_lower or "role" in genre_lower or "rp" in genre_lower:
-        return "roleplay"
-
-    if "obby" in genre_lower or "obstacle" in genre_lower or "parkour" in genre_lower:
-        return "obby"
-
-    return None
-
-
-def get_qgenre(roblox_genre, manual_genre=None):
-    if manual_genre and manual_genre != "auto":
-        return manual_genre, QGENRE_TABLE[manual_genre]
-
-    matched_genre = normalize_genre(roblox_genre)
-
-    if matched_genre and matched_genre in QGENRE_TABLE:
-        return matched_genre, QGENRE_TABLE[matched_genre]
-
-    return "simulator", QGENRE_TABLE["simulator"]
+    return matched, QGENRE_TABLE[matched][qgenre_mode]
 
 
 def get_dev_product_multiplier(visits):
-    if visits is None:
-        return 0
-
     if visits > 1_000_000:
         return 4
-
-    if visits > 500_000:
+    elif visits > 500_000:
         return 3
-
-    if visits > 300_000:
+    elif visits > 300_000:
         return 2
-
-    if visits > 50_000:
+    elif visits > 50_000:
         return 1
+    else:
+        return 0
 
-    return 0
 
-
-def calculate_pass_conversion_rates(passes):
+def calculate_average_pass_price(passes):
     paid_passes = [
         p for p in passes
         if p.get("price") is not None
     ]
 
     if not paid_passes:
-        return []
+        return 0, 0
 
-    prices = [p["price"] for p in paid_passes]
-    min_price = min(prices)
-    max_price = max(prices)
-
-    pass_results = []
-
-    for p in paid_passes:
-        price = p["price"]
-
-        if min_price == max_price:
-            conversion_rate = 0.02
-        else:
-            conversion_rate = 0.02 - (
-                (price - min_price) / (max_price - min_price)
-            ) * (0.02 - 0.001)
-
-        pass_results.append({
-            "name": p.get("name", "Unknown"),
-            "price": price,
-            "conversion_rate": conversion_rate,
-        })
-
-    return pass_results
+    average_price = sum(p["price"] for p in paid_passes) / len(paid_passes)
+    return average_price, len(paid_passes)
 
 
-def calculate_daily_revenue(
-    roblox_data,
-    rolimons_data,
-    manual_genre=None,
-    custom_dau=None,
-    custom_user_count=None,
-    custom_servers=None,
-):
-    dau = custom_dau if custom_dau is not None else rolimons_data["DAU"]
-    user_count = custom_user_count if custom_user_count is not None else rolimons_data["User_Count"]
-    servers = custom_servers if custom_servers is not None else rolimons_data["Servers"]
-
+def calculate_daily_revenue(roblox_data, rolimons_data, qgenre_mode="mid", manual_genre=None):
+    dau = rolimons_data["DAU"]
+    user_count = rolimons_data["User_Count"]
+    servers = rolimons_data["Servers"]
     visits = roblox_data["visits"]
-    roblox_genre = roblox_data.get("genre")
 
-    matched_genre, qgenre = get_qgenre(roblox_genre, manual_genre)
+    roblox_genre = roblox_data["genre"]
+
+    genre_to_use = manual_genre if manual_genre else roblox_genre
+
+    matched_genre, qgenre = detect_qgenre_from_roblox_genre(
+        genre_to_use,
+        qgenre_mode=qgenre_mode,
+    )
+
+    avg_pass_price, paid_pass_count = calculate_average_pass_price(
+        roblox_data["passes"]
+    )
 
     engagement_revenue = dau * qgenre * 5
 
-    pass_results = calculate_pass_conversion_rates(roblox_data["passes"])
-
-    total_pass_revenue = 0
-
-    for p in pass_results:
-        pass_revenue = dau * p["price"] * 0.70 * p["conversion_rate"]
-        p["daily_revenue"] = pass_revenue
-        total_pass_revenue += pass_revenue
+    pass_revenue = dau * avg_pass_price * 0.70 * qgenre
 
     multiplier = get_dev_product_multiplier(visits)
-    dev_product_revenue = total_pass_revenue * multiplier
+
+    dev_product_revenue = pass_revenue * multiplier
 
     if servers:
         players_per_server = user_count / servers
@@ -398,352 +356,388 @@ def calculate_daily_revenue(
 
     total_revenue = (
         engagement_revenue
-        + total_pass_revenue
+        + pass_revenue
         + dev_product_revenue
         + server_revenue
     )
 
     return {
+        "Roblox_Genre": roblox_genre,
+        "Genre_Used": genre_to_use,
+        "Matched_Genre": matched_genre,
+        "Qgenre_Mode": qgenre_mode,
+        "Qgenre": qgenre,
         "DAU": dau,
+        "Visits": visits,
+        "Average_Pass_Price": avg_pass_price,
+        "Paid_Pass_Count": paid_pass_count,
         "User_Count": user_count,
         "Servers": servers,
         "Players_Per_Server": players_per_server,
-        "Visits": visits,
-        "Roblox_Genre": roblox_genre,
-        "Matched_Genre": matched_genre,
-        "Qgenre": qgenre,
+        "Multiplier": multiplier,
         "Engagement_Revenue": engagement_revenue,
-        "Passes": pass_results,
-        "Total_Pass_Revenue": total_pass_revenue,
-        "Dev_Product_Multiplier": multiplier,
+        "Pass_Revenue": pass_revenue,
         "Dev_Product_Revenue": dev_product_revenue,
         "Server_Revenue": server_revenue,
         "Total_Revenue": total_revenue,
     }
 
 
-# =========================
-# Streamlit UI
-# =========================
+# ============================================================
+# Helper formatting
+# ============================================================
 
-st.title("💰 Roblox Daily Revenue Calculator")
-st.caption("Calculates estimated daily Robux revenue using Roblox API, Rolimons data, game passes, DAU, servers, and genre-based Qgenre.")
+def robux(value):
+    return f"{value:,.2f} R$"
+
+
+def number(value):
+    return f"{value:,.0f}"
+
+
+def percent(value):
+    return f"{value * 100:.2f}%"
+
+
+def build_passes_dataframe(passes):
+    rows = []
+
+    for p in passes:
+        price = p.get("price")
+
+        rows.append(
+            {
+                "Game Pass Name": p.get("name", "Unknown"),
+                "Price": "Off-sale" if price is None else f"{price} R$",
+                "Raw Price": price,
+                "ID": p.get("id"),
+                "Description": p.get("description", ""),
+            }
+        )
+
+    return pd.DataFrame(rows)
+
+
+# ============================================================
+# UI
+# ============================================================
+
+st.markdown('<div class="big-title">Roblox Revenue Calculator</div>', unsafe_allow_html=True)
+st.markdown(
+    '<div class="subtitle">Scrape Roblox and Rolimons data, then estimate daily revenue in Robux.</div>',
+    unsafe_allow_html=True,
+)
 
 with st.sidebar:
     st.header("Input")
 
     place_id_input = st.text_input(
         "Roblox Place ID",
-        placeholder="Example: 920587237",
+        placeholder="Example: 123456789",
     )
 
     st.divider()
 
-    st.subheader("Genre Override")
+    st.header("Revenue Settings")
 
-    manual_genre = st.selectbox(
-        "Revenue genre",
-        options=["auto", "pvp", "horror", "simulator", "roleplay", "obby"],
+    qgenre_mode = st.selectbox(
+        "Qgenre value",
+        options=["mid", "low", "high"],
         index=0,
-        help="Auto tries to map Roblox API genre to your Qgenre table. You can override it here.",
+        help="Uses the Qgenre table: low, midpoint, or high.",
     )
 
-    st.divider()
-
-    st.subheader("Manual Overrides")
-
-    use_manual_metrics = st.checkbox(
-        "Override Rolimons DAU / users / servers",
+    use_manual_genre = st.checkbox(
+        "Override Roblox genre manually",
         value=False,
     )
 
-    custom_dau = None
-    custom_user_count = None
-    custom_servers = None
+    manual_genre = None
 
-    if use_manual_metrics:
-        custom_dau = st.number_input(
-            "Manual DAU",
-            min_value=0.0,
-            value=0.0,
-            step=100.0,
+    if use_manual_genre:
+        manual_genre = st.selectbox(
+            "Manual genre",
+            options=["pvp", "horror", "simulator", "roleplay", "obby"],
+            index=2,
         )
 
-        custom_user_count = st.number_input(
-            "Manual User Count",
-            min_value=0.0,
-            value=0.0,
-            step=10.0,
-        )
-
-        custom_servers = st.number_input(
-            "Manual Server Count",
-            min_value=0.0,
-            value=0.0,
-            step=1.0,
-        )
+    scrape_button = st.button(
+        "Calculate Revenue",
+        use_container_width=True,
+        type="primary",
+    )
 
     st.divider()
 
-    calculate_button = st.button(
-        "Calculate Revenue",
-        type="primary",
-        use_container_width=True,
+    st.caption("Formula")
+    st.code(
+        """
+Engagement Revenue = DAU * Qgenre * 5
+
+Pass Revenue = DAU * Avg Pass Price * 0.70 * Qgenre
+
+Dev Product Revenue = Pass Revenue * Multiplier
+
+Server Revenue = Server Count * Players Per Server * 100
+
+Total Revenue = Sum of all revenue streams
+        """.strip()
     )
 
 
-st.markdown(
-    """
-    ### Revenue formulas
+if not scrape_button:
+    st.info("Enter a Roblox Place ID in the sidebar and click Calculate Revenue.")
+    st.stop()
 
-    **Engagement Revenue** = `DAU * Qgenre * 5`
 
-    **Pass Revenue of each pass** = `DAU * Pass Price * 0.70 * Conversion %`
+if not place_id_input.strip().isdigit():
+    st.error("Please enter a numeric Roblox Place ID.")
+    st.stop()
 
-    **Total Pass Revenue** = `sum(all pass revenues)`
 
-    **Daily Dev Product Revenue** = `Total Pass Revenue * Multiplier`
+place_id = int(place_id_input.strip())
 
-    **Daily Server Revenue** = `Server Count * Players Per Server * 100`
 
-    **Total Revenue** = `Engagement + Pass + Dev Product + Server`
-    """
+with st.spinner("Fetching Roblox game data..."):
+    roblox_data, roblox_error = get_game_and_passes(place_id)
+
+if roblox_error:
+    st.error(f"Roblox API error: {roblox_error}")
+    st.stop()
+
+
+with st.spinner("Scraping Rolimons data..."):
+    try:
+        rolimons_data = scrape_rolimons_game(place_id_input.strip())
+    except Exception as e:
+        st.error(f"Rolimons error: {e}")
+        st.warning(
+            "If this game works in the standalone Rolimons scraper, make sure the ID you enter here is the same ID you use on Rolimons."
+        )
+        st.stop()
+
+
+revenue = calculate_daily_revenue(
+    roblox_data=roblox_data,
+    rolimons_data=rolimons_data,
+    qgenre_mode=qgenre_mode,
+    manual_genre=manual_genre,
 )
 
 
-if calculate_button:
-    if not place_id_input.strip().isdigit():
-        st.error("Please enter a numeric Roblox Place ID.")
-        st.stop()
+# ============================================================
+# Header summary
+# ============================================================
 
-    place_id = int(place_id_input.strip())
+st.markdown('<div class="section-card">', unsafe_allow_html=True)
 
-    with st.spinner("Fetching Roblox game data..."):
-        roblox_data, roblox_error = get_game_and_passes(place_id)
+left, right = st.columns([2, 1])
 
-    if roblox_error:
-        st.error(roblox_error)
-        st.stop()
+with left:
+    st.subheader(roblox_data["name"] or "Unknown Game")
+    st.write(f"**Place ID:** {roblox_data['place_id']}")
+    st.write(f"**Universe ID:** {roblox_data['universe_id']}")
+    st.write(f"**Roblox Genre:** {roblox_data['genre']}")
+    st.write(f"**Matched Revenue Genre:** {revenue['Matched_Genre']}")
 
-    with st.spinner("Fetching Rolimons DAU and server data..."):
-        rolimons_data, rolimons_error = scrape_rolimons_game(place_id_input.strip())
-
-    if rolimons_error and not use_manual_metrics:
-        st.error(rolimons_error)
-        st.info("Tip: enable manual overrides in the sidebar if Rolimons fails for this ID.")
-        st.stop()
-
-    if rolimons_error and use_manual_metrics:
-        st.warning(rolimons_error)
-        rolimons_data = {
-            "Rolimons_ID": place_id_input.strip(),
-            "DAU": custom_dau,
-            "User_Count": custom_user_count,
-            "Servers": custom_servers,
-            "Game_URL": f"https://www.rolimons.com/game/{place_id_input.strip()}",
-            "Servers_URL": f"https://www.rolimons.com/gameservers/{place_id_input.strip()}",
-        }
-
-    revenue = calculate_daily_revenue(
-        roblox_data=roblox_data,
-        rolimons_data=rolimons_data,
-        manual_genre=manual_genre,
-        custom_dau=custom_dau if use_manual_metrics else None,
-        custom_user_count=custom_user_count if use_manual_metrics else None,
-        custom_servers=custom_servers if use_manual_metrics else None,
+with right:
+    st.markdown(
+        f"""
+        <div class="revenue-total">
+            <p>Total Daily Revenue</p>
+            <h1>{revenue['Total_Revenue']:,.2f} R$</h1>
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
 
-    st.success("Revenue calculation complete.")
+st.markdown('</div>', unsafe_allow_html=True)
 
-    # =========================
-    # Game summary
-    # =========================
 
-    st.header("🎮 Game Data")
+# ============================================================
+# Main metrics
+# ============================================================
 
-    col1, col2, col3, col4 = st.columns(4)
+st.subheader("Game Metrics")
 
-    with col1:
-        st.metric("Game", roblox_data["name"] or "Unknown")
+metric_cols = st.columns(5)
 
-    with col2:
-        st.metric("Visits", f"{roblox_data['visits']:,}" if roblox_data["visits"] else "N/A")
+with metric_cols[0]:
+    st.metric("DAU", number(revenue["DAU"]))
 
-    with col3:
-        st.metric("Likes", f"{roblox_data['likes']:,}" if roblox_data["likes"] is not None else "N/A")
+with metric_cols[1]:
+    st.metric("Visits", number(revenue["Visits"]))
 
-    with col4:
-        st.metric("Genre", roblox_data["genre"] or "Unknown")
+with metric_cols[2]:
+    st.metric("Currently Playing", number(roblox_data["playing"]))
 
-    col5, col6 = st.columns(2)
+with metric_cols[3]:
+    st.metric("Likes", number(roblox_data["likes"]))
 
-    with col5:
-        st.write(f"**Place ID:** `{roblox_data['place_id']}`")
-        st.write(f"**Universe ID:** `{roblox_data['universe_id']}`")
+with metric_cols[4]:
+    st.metric("Favorites", number(roblox_data["favorites"]))
 
-    with col6:
-        st.write(f"**Rolimons Game URL:** {rolimons_data['Game_URL']}")
-        st.write(f"**Rolimons Servers URL:** {rolimons_data['Servers_URL']}")
 
-    # =========================
-    # Rolimons summary
-    # =========================
+server_cols = st.columns(4)
 
-    st.header("📊 Rolimons Metrics")
+with server_cols[0]:
+    st.metric("Rolimons Users", number(revenue["User_Count"]))
 
-    col1, col2, col3, col4 = st.columns(4)
+with server_cols[1]:
+    st.metric("Servers", number(revenue["Servers"]))
 
-    with col1:
-        st.metric("DAU", f"{revenue['DAU']:,.0f}")
+with server_cols[2]:
+    st.metric("Players Per Server", f"{revenue['Players_Per_Server']:,.2f}")
 
-    with col2:
-        st.metric("User Count", f"{revenue['User_Count']:,.0f}")
+with server_cols[3]:
+    st.metric("Dev Product Multiplier", f"{revenue['Multiplier']}x")
 
-    with col3:
-        st.metric("Servers", f"{revenue['Servers']:,.0f}")
 
-    with col4:
-        st.metric("Players / Server", f"{revenue['Players_Per_Server']:,.2f}")
+# ============================================================
+# Revenue breakdown
+# ============================================================
 
-    # =========================
-    # Revenue summary
-    # =========================
+st.subheader("Revenue Breakdown")
 
-    st.header("💰 Daily Revenue Estimate")
-
-    revenue_cards = [
-        (
-            "Engagement Revenue",
-            format_robux(revenue["Engagement_Revenue"]),
-            f"{revenue['Engagement_Revenue']:,.2f} R$",
-        ),
-        (
-            "Pass Revenue",
-            format_robux(revenue["Total_Pass_Revenue"]),
-            f"{revenue['Total_Pass_Revenue']:,.2f} R$",
-        ),
-        (
-            "Dev Product Revenue",
-            format_robux(revenue["Dev_Product_Revenue"]),
-            f"{revenue['Dev_Product_Revenue']:,.2f} R$",
-        ),
-        (
-            "Server Revenue",
-            format_robux(revenue["Server_Revenue"]),
-            f"{revenue['Server_Revenue']:,.2f} R$",
-        ),
-        (
-            "Total Revenue",
-            format_robux(revenue["Total_Revenue"]),
-            f"{revenue['Total_Revenue']:,.2f} R$",
-        ),
+breakdown_df = pd.DataFrame(
+    [
+        {
+            "Revenue Stream": "Engagement Revenue",
+            "Formula": "DAU * Qgenre * 5",
+            "Value": revenue["Engagement_Revenue"],
+        },
+        {
+            "Revenue Stream": "Total Pass Revenue",
+            "Formula": "DAU * Avg Pass Price * 0.70 * Qgenre",
+            "Value": revenue["Pass_Revenue"],
+        },
+        {
+            "Revenue Stream": "Daily Dev Product Revenue",
+            "Formula": "Pass Revenue * Multiplier",
+            "Value": revenue["Dev_Product_Revenue"],
+        },
+        {
+            "Revenue Stream": "Daily Server Revenue",
+            "Formula": "Server Count * Players Per Server * 100",
+            "Value": revenue["Server_Revenue"],
+        },
+        {
+            "Revenue Stream": "Total Revenue",
+            "Formula": "Sum of all above revenue streams",
+            "Value": revenue["Total_Revenue"],
+        },
     ]
+)
 
-    render_revenue_cards(revenue_cards)
+display_breakdown_df = breakdown_df.copy()
+display_breakdown_df["Value"] = display_breakdown_df["Value"].map(robux)
 
-    st.subheader("Calculation Settings")
+st.dataframe(
+    display_breakdown_df,
+    use_container_width=True,
+    hide_index=True,
+)
 
-    settings_df = pd.DataFrame([
-        {
-            "Setting": "Roblox Genre",
-            "Value": revenue["Roblox_Genre"],
-        },
-        {
-            "Setting": "Matched Revenue Genre",
-            "Value": revenue["Matched_Genre"],
-        },
-        {
-            "Setting": "Qgenre",
-            "Value": f"{revenue['Qgenre'] * 100:.2f}%",
-        },
-        {
-            "Setting": "Dev Product Multiplier",
-            "Value": f"{revenue['Dev_Product_Multiplier']}x",
-        },
-    ])
 
-    st.dataframe(settings_df, use_container_width=True, hide_index=True)
+chart_df = breakdown_df[
+    breakdown_df["Revenue Stream"] != "Total Revenue"
+].copy()
 
-    # =========================
-    # Pass revenue table
-    # =========================
+st.bar_chart(
+    chart_df,
+    x="Revenue Stream",
+    y="Value",
+    use_container_width=True,
+)
 
-    st.header("🎟️ Game Pass Revenue Breakdown")
 
-    if revenue["Passes"]:
-        pass_df = pd.DataFrame(revenue["Passes"])
+# ============================================================
+# Calculation inputs
+# ============================================================
 
-        pass_df["conversion_percent"] = pass_df["conversion_rate"] * 100
+st.subheader("Calculation Inputs")
 
-        display_pass_df = pass_df.rename(columns={
-            "name": "Pass Name",
-            "price": "Price R$",
-            "conversion_percent": "Conversion %",
-            "daily_revenue": "Daily Revenue R$",
-        })[
-            [
-                "Pass Name",
-                "Price R$",
-                "Conversion %",
-                "Daily Revenue R$",
-            ]
-        ]
+calc_cols = st.columns(4)
 
-        st.dataframe(
-            display_pass_df,
-            use_container_width=True,
-            hide_index=True,
-        )
+with calc_cols[0]:
+    st.metric("Qgenre Mode", revenue["Qgenre_Mode"])
 
-        csv = display_pass_df.to_csv(index=False).encode("utf-8")
+with calc_cols[1]:
+    st.metric("Qgenre Used", percent(revenue["Qgenre"]))
 
-        st.download_button(
-            label="Download pass revenue CSV",
-            data=csv,
-            file_name="pass_revenue_breakdown.csv",
-            mime="text/csv",
-        )
+with calc_cols[2]:
+    st.metric("Average Pass Price", robux(revenue["Average_Pass_Price"]))
 
-    else:
-        st.info("No paid game passes found.")
+with calc_cols[3]:
+    st.metric("Paid Pass Count", number(revenue["Paid_Pass_Count"]))
 
-    # =========================
-    # Formula detail
-    # =========================
 
-    st.header("🧮 Formula Breakdown")
-
+with st.expander("Show exact calculation details", expanded=False):
     st.code(
         f"""
 Engagement Revenue
-= DAU * Qgenre * 5
-= {revenue['DAU']:,.0f} * {revenue['Qgenre']} * 5
+= {revenue['DAU']} * {revenue['Qgenre']} * 5
 = {revenue['Engagement_Revenue']:,.2f} R$
 
 Total Pass Revenue
-= Sum of each pass: DAU * Pass Price * 0.70 * Conversion %
-= {revenue['Total_Pass_Revenue']:,.2f} R$
+= {revenue['DAU']} * {revenue['Average_Pass_Price']} * 0.70 * {revenue['Qgenre']}
+= {revenue['Pass_Revenue']:,.2f} R$
 
-Dev Product Revenue
-= Total Pass Revenue * Multiplier
-= {revenue['Total_Pass_Revenue']:,.2f} * {revenue['Dev_Product_Multiplier']}
+Daily Dev Product Revenue
+= {revenue['Pass_Revenue']:,.2f} * {revenue['Multiplier']}
 = {revenue['Dev_Product_Revenue']:,.2f} R$
 
-Server Revenue
-= Server Count * Players Per Server * 100
-= {revenue['Servers']:,.0f} * {revenue['Players_Per_Server']:,.2f} * 100
+Daily Server Revenue
+= {revenue['Servers']} * {revenue['Players_Per_Server']:.4f} * 100
 = {revenue['Server_Revenue']:,.2f} R$
 
 Total Revenue
-= Engagement + Pass + Dev Product + Server
 = {revenue['Engagement_Revenue']:,.2f}
-+ {revenue['Total_Pass_Revenue']:,.2f}
++ {revenue['Pass_Revenue']:,.2f}
 + {revenue['Dev_Product_Revenue']:,.2f}
 + {revenue['Server_Revenue']:,.2f}
+
 = {revenue['Total_Revenue']:,.2f} R$
-        """,
-        language="text",
+        """.strip()
     )
 
+
+# ============================================================
+# Game passes table
+# ============================================================
+
+st.subheader("Game Passes")
+
+passes_df = build_passes_dataframe(roblox_data["passes"])
+
+if passes_df.empty:
+    st.info("No game passes found for this game.")
 else:
-    st.info("Enter a Roblox Place ID in the sidebar and click **Calculate Revenue**.")
+    st.dataframe(
+        passes_df,
+        use_container_width=True,
+        hide_index=True,
+    )
+
+
+# ============================================================
+# Links
+# ============================================================
+
+st.subheader("Source Links")
+
+link_cols = st.columns(2)
+
+with link_cols[0]:
+    st.link_button(
+        "Open Rolimons Game Page",
+        rolimons_data["Game_URL"],
+        use_container_width=True,
+    )
+
+with link_cols[1]:
+    st.link_button(
+        "Open Rolimons Servers Page",
+        rolimons_data["Servers_URL"],
+        use_container_width=True,
+    )
